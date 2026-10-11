@@ -384,7 +384,8 @@ else {
 	const LOW_ARGS = ['-textureQuality=0', '-pedVariety=0', '-vehicleVariety=0', '-shadowQuality=' + (q.get('shadows') === '1' ? 0 : -1), '-reflectionQuality=0', '-particleQuality=0',
 		'-grassQuality=0', '-cityDensity=0', '-lodScale=0', '-pedLodBias=0', '-vehicleLodBias=0'];
 	const cores = +(q.get('cores') || 0) || (lowMemory ? 2 : navigator.hardwareConcurrency);
-	if (lowMemory) hud.textContent = 'Low-memory device (' + (navigator.deviceMemory || '?') + ' GB reported): close other tabs. If the tab shows "Aw, Snap!" or SIGILL it ran out of memory.';
+	if (lowParam === '1') hud.textContent = 'Performance mode: low settings for a faster game.';
+	else if (lowMemory) hud.textContent = 'Low-memory device (' + (navigator.deviceMemory || '?') + ' GB reported): close other tabs. If the tab shows "Aw, Snap!" or SIGILL it ran out of memory.';
 postLog('[page env] ' + JSON.stringify({ deviceMemory: navigator.deviceMemory, cores: navigator.hardwareConcurrency, usingCores: cores, low: lowMemory, isolated: crossOriginIsolated, ua: navigator.userAgent.slice(0, 120), screen: screen.width + 'x' + screen.height + '@' + devicePixelRatio }));
 // Back buffer = the browser window in device pixels (native resolution), following window resizes live (see installInput). ?scale=0.75 renders at 75 % (faster), ?fixed=1 keeps the
 // start-up size whatever the window does, ?res=1920x1080 forces a size. Even numbers, at most 3840x2160 (2560x1440 in the low-memory profile: screen-sized render targets dominate GPU memory).
