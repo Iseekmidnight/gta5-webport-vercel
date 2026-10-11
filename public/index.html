@@ -37,6 +37,7 @@
 	#data { color: #6a9; }
 	#bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, .08); }
 	#fill { height: 100%; width: 0; background: #7cc576; }
+	#pad { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); display: none; padding: 6px 14px; border-radius: 6px; background: #000b; color: #fff; font: 15px/1.3 system-ui, sans-serif; pointer-events: none; z-index: 10; }
 	#hud { position: fixed; left: 8px; bottom: 8px; max-width: 60vw; white-space: pre-wrap; opacity: .8; pointer-events: none; }
 	#fps { position: fixed; left: 8px; top: 6px; display: none; color: #0f0; font: bold 18px/1.2 Consolas, monospace; font-variant-numeric: tabular-nums; text-shadow: 1px 1px 2px #000, 0 0 3px #000; pointer-events: none; z-index: 10; }
 </style>
@@ -46,6 +47,7 @@
 <div id="hud"></div>
 <div id="loading"><div id="ls-stage"><div id="ls-screens"></div><img id="ls-logo" src="/b/8b0b5899ed/title/logo.png" alt=""><div id="ls-bars"><div id="modes" class="ls-bar"><button data-act="back"></button><button data-act="map5"></button><button data-act="map6"></button><button data-act="sandbox"></button><button data-act="story"></button></div><div class="ls-bar"><span id="label">Starting...</span><span id="pct">0%</span><i class="ls-spin"></i></div></div></div><div id="ls-log"><div id="data"></div><div id="console"></div></div><div id="bar"><div id="fill"></div></div></div>
 <div id="fps"></div>
+<div id="pad"></div>
 <script type="module">
 // Page of the browser build. The engine runs in a dedicated worker (loader.js: its "main thread", where the static constructors and
 // main() run and which may block); the page only owns the canvas, which is transferred to that worker and on to the GPU worker.
@@ -382,7 +384,8 @@ else {
 	const LOW_ARGS = ['-textureQuality=0', '-pedVariety=0', '-vehicleVariety=0', '-shadowQuality=' + (q.get('shadows') === '1' ? 0 : -1), '-reflectionQuality=0', '-particleQuality=0',
 		'-grassQuality=0', '-cityDensity=0', '-lodScale=0', '-pedLodBias=0', '-vehicleLodBias=0'];
 	const cores = +(q.get('cores') || 0) || (lowMemory ? 2 : navigator.hardwareConcurrency);
-	if (lowMemory) hud.textContent = 'Low-memory device (' + (navigator.deviceMemory || '?') + ' GB reported): close other tabs. If the tab shows "Aw, Snap!" or SIGILL it ran out of memory.';
+	if (lowParam === '1') hud.textContent = 'Performance mode: low settings for a faster game.';
+	else if (lowMemory) hud.textContent = 'Low-memory device (' + (navigator.deviceMemory || '?') + ' GB reported): close other tabs. If the tab shows "Aw, Snap!" or SIGILL it ran out of memory.';
 postLog('[page env] ' + JSON.stringify({ deviceMemory: navigator.deviceMemory, cores: navigator.hardwareConcurrency, usingCores: cores, low: lowMemory, isolated: crossOriginIsolated, ua: navigator.userAgent.slice(0, 120), screen: screen.width + 'x' + screen.height + '@' + devicePixelRatio }));
 // Back buffer = the browser window in device pixels (native resolution), following window resizes live (see installInput). ?scale=0.75 renders at 75 % (faster), ?fixed=1 keeps the
 // start-up size whatever the window does, ?res=1920x1080 forces a size. Even numbers, at most 3840x2160 (2560x1440 in the low-memory profile: screen-sized render targets dominate GPU memory).
@@ -407,7 +410,7 @@ const ENGINE_ARGS = ['-fastscriptcore'];
 // this timer 2.1 ms, a 4 ms wait 5.0 ms). The game has no such timer, so every short sleep cost a whole tick: the limiter held a 60 fps cap to 37 fps and the visibility
 // wait added 15 ms to a frame. An empty callback; nothing else on this thread runs while the game plays.
 setInterval(() => {}, 1);
-const worker = new Worker(BASE + '/loader.js');
+const worker = new Worker(BASE + '/loader.js?v=aim1');		// ?v=: loader.js and game.wasm changed (aim assist patch) under URLs cached as immutable
 	worker.onmessage = (ev) => {
 		if (ev.data.hud) hud.textContent = ev.data.hud;
 		if (ev.data.input) installInput(ev.data.input.memory, ev.data.input.block);
@@ -474,6 +477,137 @@ function tryStartAudio() {
 	})();
 }
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, () => { audioGesture = true; tryStartAudio(); }, { capture: true });
+
+// ---- controller: Gamepad API (standard mapping: Xbox, PlayStation and most others) -> the keys and mouse the PC bindings use ----------------------------
+// The engine's input block has only keyboard and mouse, so the controller presses the PC keys of the console bindings (common/data/control/standard.meta ->
+// x64/data/control/default.meta). The engine cannot tell the page whether the player is on foot, in a vehicle or in the pause menu, so there are three layouts:
+// Y (enter/exit vehicle) switches on foot <-> vehicle, View + Y switches without pressing F; Menu (Esc) enters and leaves the menu layout, B at the top level leaves it.
+// View held is a modifier for the extras (View + button); View alone: tap = camera (V), hold = interaction menu (M). Before the game starts, A = Story, X = Sandbox, B = Back.
+let padSink = null;
+{
+	const BTN = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU', 'L3', 'R3', 'UP', 'DOWN', 'LEFT', 'RIGHT'];
+	// A / B also press Enter / Backspace and the D-pad also presses the arrows on foot and in vehicles: phone (D-pad up), its menus and cutscene skip.
+	const COMMON = { A: ['Enter'], B: ['Backspace'], UP: ['ArrowUp'], DOWN: ['ArrowDown'], LEFT: ['ArrowLeft'], RIGHT: ['ArrowRight'] };
+	const FOOT = { A: ['ShiftLeft'], B: ['KeyR'], X: ['Space'], Y: ['KeyF'], LB: ['Tab'], RB: ['KeyQ'], LT: ['mouse1'], RT: ['mouse0'], L3: ['ControlLeft'], R3: ['KeyC'], LEFT: ['KeyB'], RIGHT: ['KeyE'] };
+	const VEHICLE = { A: ['KeyX'], B: ['KeyR'], X: ['Tab'], Y: ['KeyF'], LB: ['mouse1'], RB: ['Space'], LT: ['KeyS'], RT: ['KeyW'], L3: ['KeyG'], R3: ['KeyC'], RIGHT: ['KeyH'] };
+	const MENU = { A: ['Enter'], B: ['Backspace'], X: ['Space'], Y: ['Tab'], LB: ['KeyQ'], RB: ['KeyE'], LT: ['PageDown'], RT: ['PageUp'], L3: ['ShiftLeft'], R3: ['ControlLeft'], UP: ['ArrowUp'], DOWN: ['ArrowDown'], LEFT: ['ArrowLeft'], RIGHT: ['ArrowRight'] };
+	// Tap / hold buttons: [key tapped on a short press, key held while held longer than HOLD_MS].
+	const FOOT_HOLD = { DOWN: ['KeyZ', 'AltLeft'] };								// radar / character wheel
+	const VEHICLE_HOLD = { DOWN: ['KeyZ', 'AltLeft'], LEFT: ['Comma', 'KeyQ'] };	// radar / character wheel, next station / radio wheel
+	// View + button. Y is the layout switch.
+	const COMBO = { LB: 'F9', RB: 'F10', X: 'Backquote', B: 'KeyL', A: 'KeyH', LEFT: 'F5', UP: 'F6', RIGHT: 'F7', DOWN: 'KeyN', LT: 'BracketRight', RT: 'BracketLeft' };
+	const START = { A: ['Enter', 'Digit5'], X: ['Space', 'Digit6'], B: ['Backspace'] };
+	const LOOK_SPEED = 20;		// mouse pixels per 60 Hz frame at full right-stick deflection
+	const AIM_SLOW = 0.45, TURN_FAST = 1.6;
+	const HOLD_MS = 350;
+	let layout = 'foot', menuDepth = 0, prev = {}, lookX = 0, lookY = 0, turnRamp = 0, lastUsed = -1e9, last = 0, viewUsed = false, toastTimer = 0;
+	const since = {};			// button -> time it went down
+	const suppress = new Set();	// buttons used for something else (View combo, leaving the menu, wheel): ignored until released
+	const taps = new Map();		// key -> time to release it
+	const toastEl = document.getElementById('pad');
+	const toast = (text) => { toastEl.textContent = text; toastEl.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 2500); };
+	const NAMES = { foot: 'on foot', vehicle: 'vehicle', menu: 'menu' };
+	const setLayout = (l) => { layout = l; menuDepth = 0; toast('Controller: ' + NAMES[l] + ' controls' + (l === 'menu' ? ' (Menu or B leaves)' : ' (View + Y switches)')); };
+	let gameLayout = 'foot';
+	const dead = (v, dz) => Math.abs(v) < dz ? 0 : Math.sign(v) * ((Math.abs(v) - dz) / (1 - dz));
+	addEventListener('gamepadconnected', (e) => { toast('Controller connected: ' + e.gamepad.id.replace(/\s*\(.*$/, '')); });
+	const poll = (now) => {
+		requestAnimationFrame(poll);
+		const dt = last ? Math.min(100, now - last) / (1000 / 60) : 1;
+		last = now;
+		const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find((p) => p && p.connected);
+		if (!pad || !document.hasFocus()) { if (padSink) padSink.apply(new Set()); prev = {}; return; }
+		const down = {};
+		BTN.forEach((name, i) => { const b = pad.buttons[i]; down[name] = !!b && (name === 'LT' || name === 'RT' ? b.value > 0.3 : b.pressed); });
+		const before = prev;
+		const pressed = (name) => down[name] && !before[name];
+		const released = (name) => !down[name] && before[name];
+		for (const name of BTN) { if (pressed(name)) since[name] = now; }
+		prev = down;
+		if (!startCommitted && document.getElementById('loading')) {		// the title screen's Story / Sandbox / map choice
+			for (const name of Object.keys(START)) {
+				if (!pressed(name)) continue;
+				const b = modeButtons.find((x) => !x.hidden && ACTS[x.dataset.act][2].some((c) => START[name].includes(c)));
+				if (b) act(b.dataset.act);
+			}
+			return;
+		}
+		if (!padSink) return;
+		const codes = new Set();
+		const tap = (c) => taps.set(c, now + 120);
+		// Menu: Escape, and the menu layout follows the pause menu. B at the top level of the menu leaves it like the game does.
+		if (pressed('MENU')) { tap('Escape'); setLayout(layout === 'menu' ? gameLayout : 'menu'); }
+		if (layout === 'menu') {
+			if (pressed('A')) { tap('Enter'); menuDepth = Math.min(menuDepth + 1, 4); }
+			if (pressed('B')) { tap('Backspace'); if (menuDepth > 0) menuDepth--; else { setLayout(gameLayout); suppress.add('B'); } }
+			suppress.add('A').add('B');
+		}
+		// View: modifier; alone, tap = V, hold = M.
+		if (pressed('VIEW')) viewUsed = false;
+		if (down.VIEW) {
+			for (const name of BTN) {
+				if (!pressed(name) || name === 'VIEW' || name === 'MENU') continue;
+				viewUsed = true;
+				suppress.add(name);
+				if (name === 'Y' && layout !== 'menu') { gameLayout = layout === 'foot' ? 'vehicle' : 'foot'; setLayout(gameLayout); }
+				else if (COMBO[name]) tap(COMBO[name]);
+			}
+		}
+		if (released('VIEW') && !viewUsed) tap(now - since.VIEW > 600 ? 'KeyM' : 'KeyV');
+		if (layout !== 'menu' && !down.VIEW && pressed('Y')) { gameLayout = layout === 'foot' ? 'vehicle' : 'foot'; setLayout(gameLayout); }
+		const map = layout === 'menu' ? MENU : layout === 'vehicle' ? VEHICLE : FOOT;
+		const hold = layout === 'menu' ? {} : layout === 'vehicle' ? VEHICLE_HOLD : FOOT_HOLD;
+		const special = layout !== 'menu' && down.L3 && down.R3;		// L3 + R3: special ability (Caps Lock)
+		if (special) codes.add('CapsLock');
+		// LB held on foot (weapon wheel): D-pad left / right scroll it. LT held on foot (aiming): D-pad up / down zoom the scope.
+		const wheelMode = layout === 'foot' && (down.LB ? { LEFT: -1, RIGHT: 1 } : down.LT ? { UP: 1, DOWN: -1 } : null);
+		let wheel = 0;
+		for (const name of BTN) {
+			if (name === 'VIEW' || name === 'MENU') continue;
+			if (suppress.has(name)) { if (!down[name]) suppress.delete(name); continue; }
+			if (special && (name === 'L3' || name === 'R3')) continue;
+			if (wheelMode && name in wheelMode) { if (pressed(name)) { wheel += wheelMode[name]; suppress.add(name); } continue; }
+			if (hold[name]) {
+				if (down[name] && now - since[name] > HOLD_MS) codes.add(hold[name][1]);
+				else if (released(name) && now - since[name] <= HOLD_MS) tap(hold[name][0]);
+				if (down[name]) for (const c of COMMON[name] || []) codes.add(c);
+				continue;
+			}
+			if (!down[name]) continue;
+			if (layout !== 'menu') for (const c of COMMON[name] || []) codes.add(c);
+			for (const c of map[name] || []) codes.add(c);
+		}
+		for (const [c, until] of taps) { if (now < until) codes.add(c); else taps.delete(c); }
+		const lx = dead(pad.axes[0] || 0, 0.25), ly = dead(pad.axes[1] || 0, 0.25);
+		if (layout === 'vehicle') {			// steer (A/D), lean or pitch (Shift/Ctrl, numpad 8/2); aircraft roll on numpad 4/6 with yaw on A/D
+			if (lx < -0.3) codes.add('KeyA').add('Numpad4');
+			if (lx > 0.3) codes.add('KeyD').add('Numpad6');
+			if (ly < -0.4) codes.add('Numpad8').add('ShiftLeft');
+			if (ly > 0.4) codes.add('Numpad2').add('ControlLeft');
+		} else {
+			if (lx < -0.4) codes.add('KeyA');
+			if (lx > 0.4) codes.add('KeyD');
+			if (ly < -0.4) codes.add('KeyW');
+			if (ly > 0.4) codes.add('KeyS');
+		}
+		if (Object.values(down).some(Boolean) || Math.abs(lx) + Math.abs(ly) > 0 || Math.abs(pad.axes[2] || 0) + Math.abs(pad.axes[3] || 0) > 0.2) lastUsed = now;
+		padSink.assist(now - lastUsed < 10000);
+		padSink.apply(codes);
+		if (wheel) padSink.wheel(wheel);
+		const rx = dead(pad.axes[2] || 0, 0.15), ry = dead(pad.axes[3] || 0, 0.15);
+		// Aim assist: the engine only gets mouse input here, so its own lock-on never runs. Instead the camera slows to AIM_SLOW while aiming (LT) for
+		// small corrections, and speeds up towards TURN_FAST while the stick is held near full for quick turns.
+		const full = Math.hypot(rx, ry) > 0.9;
+		turnRamp = full ? Math.min(1, turnRamp + dt / 20) : 0;
+		const aiming = layout === 'foot' && down.LT;
+		const speed = LOOK_SPEED * (aiming ? AIM_SLOW + (1 - AIM_SLOW) * turnRamp : 1 + (TURN_FAST - 1) * turnRamp);
+		lookX += Math.sign(rx) * rx * rx * speed * dt;
+		lookY += Math.sign(ry) * ry * ry * speed * dt;
+		const mx = Math.trunc(lookX), my = Math.trunc(lookY);
+		if (mx || my) { lookX -= mx; lookY -= my; padSink.look(mx, my); }
+	};
+	requestAnimationFrame(poll);
+}
 
 // ---- input: DOM events -> the engine's input block in shared memory (platform/input/browser_input_wasm.cpp) ------------------------
 // Layout of WasmInputBlock: 256 key bytes, then int32 words: mouseX, mouseY, dX, dY, dZ, buttons, focus, locked, textHead, textTail, text[64] (uint16).
@@ -548,7 +682,8 @@ function installInput(memory, block) {
 	// and U/O (target left/right) press the same keys for the engine; the real numpad keeps working.
 	const FLY_ALIAS = { KeyI: 'Numpad8', KeyK: 'Numpad2', KeyJ: 'Numpad4', KeyL: 'Numpad6', KeyU: 'Numpad7', KeyO: 'Numpad9' };
 	const held = new Set();
-	const syncFlyAlias = () => { for (const [src, target] of Object.entries(FLY_ALIAS)) Atomics.store(keys, VK[target], held.has(src) || held.has(target) ? 0x80 : 0); };
+	let padKeys = new Set();		// keys the controller holds (controller section above)
+	const syncFlyAlias = () => { for (const [src, target] of Object.entries(FLY_ALIAS)) Atomics.store(keys, VK[target], held.has(src) || held.has(target) || padKeys.has(target) ? 0x80 : 0); };
 	addEventListener('keydown', (e) => {
 		if (passThrough(e)) return;
 		e.preventDefault();
@@ -611,6 +746,31 @@ function installInput(memory, block) {
 		const n = Math.trunc(wheelAccum);
 		if (n) { wheelAccum -= n; Atomics.add(w, DZ, n); }
 	}, { passive: false });
+
+	const PAD_MOUSE = { mouse0: 1, mouse1: 2, mouse2: 4 };
+	// Key byte 255 (no Windows key code) tells the engine a controller is in use: game.wasm is patched (desktop/patch-aim-assist.py) so that
+	// CPlayerPedTargeting::GetTargetingMode then gives lock-on aim assist instead of the mouse's free aim.
+	const PAD_ASSIST = 255;
+	padSink = {
+		apply(codes) {
+			for (const c of new Set([...padKeys, ...codes])) {
+				const on = codes.has(c);
+				if (PAD_MOUSE[c]) { if (on) Atomics.or(w, BTN, PAD_MOUSE[c]); else if (padKeys.has(c)) Atomics.and(w, BTN, ~PAD_MOUSE[c]); }
+				else if (VK[c]) Atomics.store(keys, VK[c], on || held.has(c) ? 0x80 : 0);
+			}
+			padKeys = codes;
+			syncFlyAlias();
+		},
+		wheel(n) { Atomics.add(w, DZ, n); },
+		assist(on) { Atomics.store(keys, PAD_ASSIST, on ? 0x80 : 0); },
+		look(dx, dy) {
+			if (!locked()) Atomics.store(w, LOCKED, 1);		// the camera follows relative motion as with a captured mouse
+			Atomics.add(w, DX, dx);
+			Atomics.add(w, DY, dy);
+			Atomics.store(w, MX, Math.max(0, Math.min(W - 1, Atomics.load(w, MX) + dx)));
+			Atomics.store(w, MY, Math.max(0, Math.min(H - 1, Atomics.load(w, MY) + dy)));
+		},
+	};
 }
 </script>
 </body>
