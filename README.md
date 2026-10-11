@@ -27,6 +27,9 @@ The exe contains everything in `public/` and runs a small local server on
 opens the game in Microsoft Edge (or Chrome) as an app window. Closing the game
 window stops the server.
 
+The exe starts the game in performance mode (low settings, 70 % render scale,
+30 fps cap) for laptops. Run `"GTA 5 project.exe" --high` for the normal settings.
+
 ## Controller
 
 Xbox and PlayStation controllers work through the browser Gamepad API (press any
