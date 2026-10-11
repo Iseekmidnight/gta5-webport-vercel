@@ -65,6 +65,11 @@ top of the screen shows the current layout.
 | View | Tap: camera, hold: interaction menu | same | |
 | Menu | Pause | Pause | Leave menu |
 
+Aim assist: while a controller is in use, holding LT locks on to a target like
+the console's "Assisted Aim" (mouse aiming stays free aim). `game.wasm` is
+patched for this by `desktop/patch-aim-assist.py`. While aiming, the right stick
+also moves the camera at reduced speed for small corrections.
+
 On foot, D-pad left / right scroll through the weapon wheel while LB is held,
 and D-pad up / down zoom the scope while LT is held.
 

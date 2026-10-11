@@ -410,7 +410,7 @@ const ENGINE_ARGS = ['-fastscriptcore'];
 // this timer 2.1 ms, a 4 ms wait 5.0 ms). The game has no such timer, so every short sleep cost a whole tick: the limiter held a 60 fps cap to 37 fps and the visibility
 // wait added 15 ms to a frame. An empty callback; nothing else on this thread runs while the game plays.
 setInterval(() => {}, 1);
-const worker = new Worker(BASE + '/loader.js');
+const worker = new Worker(BASE + '/loader.js?v=aim1');		// ?v=: loader.js and game.wasm changed (aim assist patch) under URLs cached as immutable
 	worker.onmessage = (ev) => {
 		if (ev.data.hud) hud.textContent = ev.data.hud;
 		if (ev.data.input) installInput(ev.data.input.memory, ev.data.input.block);
@@ -500,7 +500,7 @@ let padSink = null;
 	const LOOK_SPEED = 20;		// mouse pixels per 60 Hz frame at full right-stick deflection
 	const AIM_SLOW = 0.45, TURN_FAST = 1.6;
 	const HOLD_MS = 350;
-	let layout = 'foot', menuDepth = 0, prev = {}, lookX = 0, lookY = 0, turnRamp = 0, last = 0, viewUsed = false, toastTimer = 0;
+	let layout = 'foot', menuDepth = 0, prev = {}, lookX = 0, lookY = 0, turnRamp = 0, lastUsed = -1e9, last = 0, viewUsed = false, toastTimer = 0;
 	const since = {};			// button -> time it went down
 	const suppress = new Set();	// buttons used for something else (View combo, leaving the menu, wheel): ignored until released
 	const taps = new Map();		// key -> time to release it
@@ -590,6 +590,8 @@ let padSink = null;
 			if (ly < -0.4) codes.add('KeyW');
 			if (ly > 0.4) codes.add('KeyS');
 		}
+		if (Object.values(down).some(Boolean) || Math.abs(lx) + Math.abs(ly) > 0 || Math.abs(pad.axes[2] || 0) + Math.abs(pad.axes[3] || 0) > 0.2) lastUsed = now;
+		padSink.assist(now - lastUsed < 10000);
 		padSink.apply(codes);
 		if (wheel) padSink.wheel(wheel);
 		const rx = dead(pad.axes[2] || 0, 0.15), ry = dead(pad.axes[3] || 0, 0.15);
@@ -746,6 +748,9 @@ function installInput(memory, block) {
 	}, { passive: false });
 
 	const PAD_MOUSE = { mouse0: 1, mouse1: 2, mouse2: 4 };
+	// Key byte 255 (no Windows key code) tells the engine a controller is in use: game.wasm is patched (desktop/patch-aim-assist.py) so that
+	// CPlayerPedTargeting::GetTargetingMode then gives lock-on aim assist instead of the mouse's free aim.
+	const PAD_ASSIST = 255;
 	padSink = {
 		apply(codes) {
 			for (const c of new Set([...padKeys, ...codes])) {
@@ -757,6 +762,7 @@ function installInput(memory, block) {
 			syncFlyAlias();
 		},
 		wheel(n) { Atomics.add(w, DZ, n); },
+		assist(on) { Atomics.store(keys, PAD_ASSIST, on ? 0x80 : 0); },
 		look(dx, dy) {
 			if (!locked()) Atomics.store(w, LOCKED, 1);		// the camera follows relative motion as with a captured mouse
 			Atomics.add(w, DX, dx);
