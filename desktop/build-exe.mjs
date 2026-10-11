@@ -28,7 +28,7 @@ console.log(`Packed ${files.length} site files (${(offset / 2 ** 20).toFixed(0)}
 await mkdir(join(root, 'dist'), {recursive:true});
 const targets = process.argv.slice(2).length ? process.argv.slice(2) : ['bun-windows-x64'];
 for (const target of targets) {
-  const outfile = join(root, 'dist', target.includes('windows') ? 'GTA5-Webport.exe' : 'GTA5-Webport-' + target.replace('bun-', ''));
+  const outfile = join(root, 'dist', target.includes('windows') ? 'GTA 5 project.exe' : 'GTA5-Webport-' + target.replace('bun-', ''));
   const args = ['build', '--compile', '--minify', `--target=${target}`, join(import.meta.dirname, 'launcher.js'), '--outfile', outfile];
   const result = spawnSync(process.execPath, args, {stdio:'inherit'});
   if (result.status !== 0) process.exit(result.status ?? 1);

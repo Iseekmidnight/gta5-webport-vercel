@@ -21,7 +21,7 @@ preparation screen checks again every 30 seconds and starts automatically.
 
 ## Windows .exe
 
-Run `npm run exe` (needs [Bun](https://bun.sh)) to build `dist/GTA5-Webport.exe`.
+Run `npm run exe` (needs [Bun](https://bun.sh)) to build `dist/GTA 5 project.exe`.
 The exe contains everything in `public/` and runs a small local server on
 `127.0.0.1:8127` that streams game data from the `game-data-v2` release, then
 opens the game in Microsoft Edge (or Chrome) as an app window. Closing the game
