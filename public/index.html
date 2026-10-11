@@ -497,8 +497,9 @@ let padSink = null;
 	const COMBO = { LB: 'F9', RB: 'F10', X: 'Backquote', B: 'KeyL', A: 'KeyH', LEFT: 'F5', UP: 'F6', RIGHT: 'F7', DOWN: 'KeyN', LT: 'BracketRight', RT: 'BracketLeft' };
 	const START = { A: ['Enter', 'Digit5'], X: ['Space', 'Digit6'], B: ['Backspace'] };
 	const LOOK_SPEED = 20;		// mouse pixels per 60 Hz frame at full right-stick deflection
+	const AIM_SLOW = 0.45, TURN_FAST = 1.6;
 	const HOLD_MS = 350;
-	let layout = 'foot', menuDepth = 0, prev = {}, lookX = 0, lookY = 0, last = 0, viewUsed = false, toastTimer = 0;
+	let layout = 'foot', menuDepth = 0, prev = {}, lookX = 0, lookY = 0, turnRamp = 0, last = 0, viewUsed = false, toastTimer = 0;
 	const since = {};			// button -> time it went down
 	const suppress = new Set();	// buttons used for something else (View combo, leaving the menu, wheel): ignored until released
 	const taps = new Map();		// key -> time to release it
@@ -591,8 +592,14 @@ let padSink = null;
 		padSink.apply(codes);
 		if (wheel) padSink.wheel(wheel);
 		const rx = dead(pad.axes[2] || 0, 0.15), ry = dead(pad.axes[3] || 0, 0.15);
-		lookX += Math.sign(rx) * rx * rx * LOOK_SPEED * dt;
-		lookY += Math.sign(ry) * ry * ry * LOOK_SPEED * dt;
+		// Aim assist: the engine only gets mouse input here, so its own lock-on never runs. Instead the camera slows to AIM_SLOW while aiming (LT) for
+		// small corrections, and speeds up towards TURN_FAST while the stick is held near full for quick turns.
+		const full = Math.hypot(rx, ry) > 0.9;
+		turnRamp = full ? Math.min(1, turnRamp + dt / 20) : 0;
+		const aiming = layout === 'foot' && down.LT;
+		const speed = LOOK_SPEED * (aiming ? AIM_SLOW + (1 - AIM_SLOW) * turnRamp : 1 + (TURN_FAST - 1) * turnRamp);
+		lookX += Math.sign(rx) * rx * rx * speed * dt;
+		lookY += Math.sign(ry) * ry * ry * speed * dt;
 		const mx = Math.trunc(lookX), my = Math.trunc(lookY);
 		if (mx || my) { lookX -= mx; lookY -= my; padSink.look(mx, my); }
 	};

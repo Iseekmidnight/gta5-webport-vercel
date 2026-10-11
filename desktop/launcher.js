@@ -66,6 +66,8 @@ function findBrowser() {
 
 const server = listen();
 const address = `http://127.0.0.1:${server.port}/`;
+// Performance mode by default (low settings, 70 % render scale, 30 fps cap) for laptops; `--high` runs the page's normal settings.
+const gameUrl = address + (process.argv.includes('--high') ? '' : '?low=1&scale=0.7&fps=30');
 console.log('GTA V Webport is running at ' + address);
 console.log('Keep this window open while you play. Close it to stop the game.\n');
 
@@ -74,7 +76,7 @@ if (browser) {
   const home = process.env.LOCALAPPDATA || process.env.HOME || '.';
   const profile = join(home, 'GTA5Webport', 'browser-profile');
   mkdirSync(profile, {recursive:true});
-  const child = spawn(browser, ['--app=' + address, '--user-data-dir=' + profile, '--start-maximized', '--no-first-run',
+  const child = spawn(browser, ['--app=' + gameUrl, '--user-data-dir=' + profile, '--start-maximized', '--no-first-run',
     '--no-default-browser-check', '--enable-features=SharedArrayBuffer'], {stdio:'ignore'});
   child.on('exit', () => { console.log('Game window closed.'); server.stop(true); process.exit(0); });
   child.on('error', () => openDefault());
@@ -82,6 +84,6 @@ if (browser) {
 
 function openDefault() {
   console.log('Microsoft Edge or Google Chrome was not found. Opening your default browser (it must support WebGPU).');
-  const command = process.platform === 'win32' ? ['cmd', ['/c','start','',address]] : process.platform === 'darwin' ? ['open',[address]] : ['xdg-open',[address]];
+  const command = process.platform === 'win32' ? ['rundll32', ['url.dll,FileProtocolHandler',gameUrl]] : process.platform === 'darwin' ? ['open',[gameUrl]] : ['xdg-open',[gameUrl]];
   spawn(command[0], command[1], {stdio:'ignore', detached:true}).unref();
 }
