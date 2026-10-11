@@ -18,3 +18,11 @@ Game data is published in the `game-data-v2` GitHub release for this deployment.
 initial release is uploading. Set `ready` to `true` only after all indexed
 packs have been uploaded and live byte-range and batch checks pass. An open
 preparation screen checks again every 30 seconds and starts automatically.
+
+## Windows .exe
+
+Run `npm run exe` (needs [Bun](https://bun.sh)) to build `dist/GTA5-Webport.exe`.
+The exe contains everything in `public/` and runs a small local server on
+`127.0.0.1:8127` that streams game data from the `game-data-v2` release, then
+opens the game in Microsoft Edge (or Chrome) as an app window. Closing the game
+window stops the server.
