@@ -30,22 +30,42 @@ window stops the server.
 ## Controller
 
 Xbox and PlayStation controllers work through the browser Gamepad API (press any
-button after the page loads). Start screen: A = Story, X = Sandbox, B = Back.
+button after the page loads). The game only reads keyboard and mouse here, so
+each button presses the PC key of the matching console control. Start screen:
+A = Story, X = Sandbox, B = Back.
 
-| Control | On foot | In vehicle |
-| --- | --- | --- |
-| Left stick | Move (WASD) | Steer (A/D) |
-| Right stick | Camera | Camera |
-| RT / LT | Attack / Aim | Accelerate / Brake |
-| A | Sprint | |
-| B | Reload | |
-| X | Jump | Exit vehicle (E) |
-| Y | Enter vehicle (F) | Exit vehicle (F) |
-| LB / RB | Weapon wheel (Tab) / Cover (Q) | Fire / Handbrake |
-| L3 / R3 | Crouch / Look behind (C) | Horn (E) / Look behind (C) |
-| D-pad | Arrow keys | Arrow keys |
-| View | Tap: camera (V), hold: map (M) | same |
-| Menu | Pause (Esc) | Pause (Esc) |
+The page cannot see whether you are on foot, driving or in the pause menu, so
+there are three layouts. Y (enter/exit vehicle) switches between on foot and
+vehicle, View + Y switches without pressing F, and Menu switches to the menu
+layout and back (B at the top of the menu also leaves it). A message at the
+top of the screen shows the current layout.
 
-Y switches between the on-foot and vehicle layouts; View+Y switches without
-pressing F.
+| Control | On foot | In vehicle | Pause menu |
+| --- | --- | --- | --- |
+| Left stick | Move | Steer, lean / pitch (aircraft roll) | Move map |
+| Right stick | Camera / aim | Camera | Cursor |
+| RT | Attack, open parachute | Accelerate / throttle up | Next tab group (Page Up) |
+| LT | Aim | Brake, reverse / throttle down | Previous tab group (Page Down) |
+| RB | Cover | Handbrake | Next tab (E) |
+| LB | Weapon wheel (hold) | Vehicle aim | Previous tab (Q) |
+| A | Sprint, accept | Duck | Accept |
+| B | Reload, light melee, cancel | Cinematic camera, cancel | Back |
+| X | Jump, heavy melee | Next vehicle weapon | Space option |
+| Y | Enter vehicle, parachute | Exit vehicle | Tab option |
+| L3 | Duck / stealth | Horn | |
+| R3 | Look behind | Look behind | |
+| L3 + R3 | Special ability | Special ability | |
+| D-pad up | Phone | Phone | Up |
+| D-pad down | Tap: radar, hold: character wheel | same | Down |
+| D-pad left | Detonate / throw | Tap: next radio station, hold: radio wheel | Left |
+| D-pad right | Talk / pick up / context | Headlights | Right |
+| View | Tap: camera, hold: interaction menu | same | |
+| Menu | Pause | Pause | Leave menu |
+
+On foot, D-pad left / right scroll through the weapon wheel while LB is held,
+and D-pad up / down zoom the scope while LT is held.
+
+Extras, holding View: View + LB drop weapon, View + RB drop ammo, View + LEFT /
+UP / RIGHT switch to Michael / Franklin / Trevor, View + X cheat console,
+View + B cinematic slow motion, View + A headlights, View + DOWN multiplayer
+info, View + LT / RT sniper zoom out / in.

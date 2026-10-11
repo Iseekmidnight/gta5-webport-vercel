@@ -478,22 +478,35 @@ function tryStartAudio() {
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, () => { audioGesture = true; tryStartAudio(); }, { capture: true });
 
 // ---- controller: Gamepad API (standard mapping: Xbox, PlayStation and most others) -> the keys and mouse the PC bindings use ----------------------------
-// The engine's input block has only keyboard and mouse, so the controller presses PC keys. Two layouts like the console controls: on foot and in a vehicle.
-// Y (enter/exit vehicle) switches the layout; View + Y switches it without pressing F. A and B also press Enter and Backspace (menus, phone); the D-pad is the arrow keys.
-// View: camera (V), held: interaction menu (M). Menu: pause (Esc). Before the game starts, A = Story Mode, X = Sandbox Mode, B = Back.
+// The engine's input block has only keyboard and mouse, so the controller presses the PC keys of the console bindings (common/data/control/standard.meta ->
+// x64/data/control/default.meta). The engine cannot tell the page whether the player is on foot, in a vehicle or in the pause menu, so there are three layouts:
+// Y (enter/exit vehicle) switches on foot <-> vehicle, View + Y switches without pressing F; Menu (Esc) enters and leaves the menu layout, B at the top level leaves it.
+// View held is a modifier for the extras (View + button); View alone: tap = camera (V), hold = interaction menu (M). Before the game starts, A = Story, X = Sandbox, B = Back.
 let padSink = null;
 {
 	const BTN = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU', 'L3', 'R3', 'UP', 'DOWN', 'LEFT', 'RIGHT'];
-	const COMMON = { A: ['Enter'], B: ['Backspace'], MENU: ['Escape'], UP: ['ArrowUp'], DOWN: ['ArrowDown'], LEFT: ['ArrowLeft'], RIGHT: ['ArrowRight'] };
-	const FOOT = { A: ['ShiftLeft'], B: ['KeyR'], X: ['Space'], Y: ['KeyF'], LB: ['Tab'], RB: ['KeyQ'], RT: ['mouse0'], LT: ['mouse1'], L3: ['ControlLeft'], R3: ['KeyC'] };
-	const VEHICLE = { Y: ['KeyF'], RT: ['KeyW'], LT: ['KeyS'], RB: ['Space'], LB: ['mouse0'], X: ['KeyE'], L3: ['KeyE'], R3: ['KeyC'] };
+	// A / B also press Enter / Backspace and the D-pad also presses the arrows on foot and in vehicles: phone (D-pad up), its menus and cutscene skip.
+	const COMMON = { A: ['Enter'], B: ['Backspace'], UP: ['ArrowUp'], DOWN: ['ArrowDown'], LEFT: ['ArrowLeft'], RIGHT: ['ArrowRight'] };
+	const FOOT = { A: ['ShiftLeft'], B: ['KeyR'], X: ['Space'], Y: ['KeyF'], LB: ['Tab'], RB: ['KeyQ'], LT: ['mouse1'], RT: ['mouse0'], L3: ['ControlLeft'], R3: ['KeyC'], LEFT: ['KeyB'], RIGHT: ['KeyE'] };
+	const VEHICLE = { A: ['KeyX'], B: ['KeyR'], X: ['Tab'], Y: ['KeyF'], LB: ['mouse1'], RB: ['Space'], LT: ['KeyS'], RT: ['KeyW'], L3: ['KeyG'], R3: ['KeyC'], RIGHT: ['KeyH'] };
+	const MENU = { A: ['Enter'], B: ['Backspace'], X: ['Space'], Y: ['Tab'], LB: ['KeyQ'], RB: ['KeyE'], LT: ['PageDown'], RT: ['PageUp'], L3: ['ShiftLeft'], R3: ['ControlLeft'], UP: ['ArrowUp'], DOWN: ['ArrowDown'], LEFT: ['ArrowLeft'], RIGHT: ['ArrowRight'] };
+	// Tap / hold buttons: [key tapped on a short press, key held while held longer than HOLD_MS].
+	const FOOT_HOLD = { DOWN: ['KeyZ', 'AltLeft'] };								// radar / character wheel
+	const VEHICLE_HOLD = { DOWN: ['KeyZ', 'AltLeft'], LEFT: ['Comma', 'KeyQ'] };	// radar / character wheel, next station / radio wheel
+	// View + button. Y is the layout switch.
+	const COMBO = { LB: 'F9', RB: 'F10', X: 'Backquote', B: 'KeyL', A: 'KeyH', LEFT: 'F5', UP: 'F6', RIGHT: 'F7', DOWN: 'KeyN', LT: 'BracketRight', RT: 'BracketLeft' };
 	const START = { A: ['Enter', 'Digit5'], X: ['Space', 'Digit6'], B: ['Backspace'] };
 	const LOOK_SPEED = 20;		// mouse pixels per 60 Hz frame at full right-stick deflection
-	let vehicle = false, prev = {}, lookX = 0, lookY = 0, last = 0, viewDown = 0, viewUsed = false, toastTimer = 0;
-	const taps = new Map();
+	const HOLD_MS = 350;
+	let layout = 'foot', menuDepth = 0, prev = {}, lookX = 0, lookY = 0, last = 0, viewUsed = false, toastTimer = 0;
+	const since = {};			// button -> time it went down
+	const suppress = new Set();	// buttons used for something else (View combo, leaving the menu, wheel): ignored until released
+	const taps = new Map();		// key -> time to release it
 	const toastEl = document.getElementById('pad');
 	const toast = (text) => { toastEl.textContent = text; toastEl.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 2500); };
-	const layoutName = () => 'Controller: ' + (vehicle ? 'vehicle' : 'on foot') + ' controls (View + Y switches)';
+	const NAMES = { foot: 'on foot', vehicle: 'vehicle', menu: 'menu' };
+	const setLayout = (l) => { layout = l; menuDepth = 0; toast('Controller: ' + NAMES[l] + ' controls' + (l === 'menu' ? ' (Menu or B leaves)' : ' (View + Y switches)')); };
+	let gameLayout = 'foot';
 	const dead = (v, dz) => Math.abs(v) < dz ? 0 : Math.sign(v) * ((Math.abs(v) - dz) / (1 - dz));
 	addEventListener('gamepadconnected', (e) => { toast('Controller connected: ' + e.gamepad.id.replace(/\s*\(.*$/, '')); });
 	const poll = (now) => {
@@ -506,6 +519,8 @@ let padSink = null;
 		BTN.forEach((name, i) => { const b = pad.buttons[i]; down[name] = !!b && (name === 'LT' || name === 'RT' ? b.value > 0.3 : b.pressed); });
 		const before = prev;
 		const pressed = (name) => down[name] && !before[name];
+		const released = (name) => !down[name] && before[name];
+		for (const name of BTN) { if (pressed(name)) since[name] = now; }
 		prev = down;
 		if (!startCommitted && document.getElementById('loading')) {		// the title screen's Story / Sandbox / map choice
 			for (const name of Object.keys(START)) {
@@ -516,23 +531,57 @@ let padSink = null;
 			return;
 		}
 		if (!padSink) return;
-		if (pressed('VIEW')) { viewDown = now; viewUsed = false; }
-		if (down.VIEW && pressed('Y')) { vehicle = !vehicle; viewUsed = true; toast(layoutName()); }
-		else if (pressed('Y')) { vehicle = !vehicle; toast(layoutName()); }
-		if (!down.VIEW && viewDown) { if (!viewUsed) taps.set(now - viewDown > 600 ? 'KeyM' : 'KeyV', now + 120); viewDown = 0; }
 		const codes = new Set();
-		const layout = vehicle ? VEHICLE : FOOT;
+		const tap = (c) => taps.set(c, now + 120);
+		// Menu: Escape, and the menu layout follows the pause menu. B at the top level of the menu leaves it like the game does.
+		if (pressed('MENU')) { tap('Escape'); setLayout(layout === 'menu' ? gameLayout : 'menu'); }
+		if (layout === 'menu') {
+			if (pressed('A')) { tap('Enter'); menuDepth = Math.min(menuDepth + 1, 4); }
+			if (pressed('B')) { tap('Backspace'); if (menuDepth > 0) menuDepth--; else { setLayout(gameLayout); suppress.add('B'); } }
+			suppress.add('A').add('B');
+		}
+		// View: modifier; alone, tap = V, hold = M.
+		if (pressed('VIEW')) viewUsed = false;
+		if (down.VIEW) {
+			for (const name of BTN) {
+				if (!pressed(name) || name === 'VIEW' || name === 'MENU') continue;
+				viewUsed = true;
+				suppress.add(name);
+				if (name === 'Y' && layout !== 'menu') { gameLayout = layout === 'foot' ? 'vehicle' : 'foot'; setLayout(gameLayout); }
+				else if (COMBO[name]) tap(COMBO[name]);
+			}
+		}
+		if (released('VIEW') && !viewUsed) tap(now - since.VIEW > 600 ? 'KeyM' : 'KeyV');
+		if (layout !== 'menu' && !down.VIEW && pressed('Y')) { gameLayout = layout === 'foot' ? 'vehicle' : 'foot'; setLayout(gameLayout); }
+		const map = layout === 'menu' ? MENU : layout === 'vehicle' ? VEHICLE : FOOT;
+		const hold = layout === 'menu' ? {} : layout === 'vehicle' ? VEHICLE_HOLD : FOOT_HOLD;
+		const special = layout !== 'menu' && down.L3 && down.R3;		// L3 + R3: special ability (Caps Lock)
+		if (special) codes.add('CapsLock');
+		// LB held on foot (weapon wheel): D-pad left / right scroll it. LT held on foot (aiming): D-pad up / down zoom the scope.
+		const wheelMode = layout === 'foot' && (down.LB ? { LEFT: -1, RIGHT: 1 } : down.LT ? { UP: 1, DOWN: -1 } : null);
+		let wheel = 0;
 		for (const name of BTN) {
-			if (!down[name] || (name === 'Y' && down.VIEW)) continue;
-			for (const c of [...(COMMON[name] || []), ...(layout[name] || [])]) codes.add(c);
+			if (name === 'VIEW' || name === 'MENU') continue;
+			if (suppress.has(name)) { if (!down[name]) suppress.delete(name); continue; }
+			if (special && (name === 'L3' || name === 'R3')) continue;
+			if (wheelMode && name in wheelMode) { if (pressed(name)) { wheel += wheelMode[name]; suppress.add(name); } continue; }
+			if (hold[name]) {
+				if (down[name] && now - since[name] > HOLD_MS) codes.add(hold[name][1]);
+				else if (released(name) && now - since[name] <= HOLD_MS) tap(hold[name][0]);
+				if (down[name]) for (const c of COMMON[name] || []) codes.add(c);
+				continue;
+			}
+			if (!down[name]) continue;
+			if (layout !== 'menu') for (const c of COMMON[name] || []) codes.add(c);
+			for (const c of map[name] || []) codes.add(c);
 		}
 		for (const [c, until] of taps) { if (now < until) codes.add(c); else taps.delete(c); }
 		const lx = dead(pad.axes[0] || 0, 0.25), ly = dead(pad.axes[1] || 0, 0.25);
-		if (vehicle) {
+		if (layout === 'vehicle') {			// steer (A/D), lean or pitch (Shift/Ctrl, numpad 8/2); aircraft roll on numpad 4/6 with yaw on A/D
 			if (lx < -0.3) codes.add('KeyA').add('Numpad4');
 			if (lx > 0.3) codes.add('KeyD').add('Numpad6');
-			if (ly < -0.4) codes.add('Numpad8');
-			if (ly > 0.4) codes.add('Numpad2');
+			if (ly < -0.4) codes.add('Numpad8').add('ShiftLeft');
+			if (ly > 0.4) codes.add('Numpad2').add('ControlLeft');
 		} else {
 			if (lx < -0.4) codes.add('KeyA');
 			if (lx > 0.4) codes.add('KeyD');
@@ -540,6 +589,7 @@ let padSink = null;
 			if (ly > 0.4) codes.add('KeyS');
 		}
 		padSink.apply(codes);
+		if (wheel) padSink.wheel(wheel);
 		const rx = dead(pad.axes[2] || 0, 0.15), ry = dead(pad.axes[3] || 0, 0.15);
 		lookX += Math.sign(rx) * rx * rx * LOOK_SPEED * dt;
 		lookY += Math.sign(ry) * ry * ry * LOOK_SPEED * dt;
@@ -687,7 +737,7 @@ function installInput(memory, block) {
 		if (n) { wheelAccum -= n; Atomics.add(w, DZ, n); }
 	}, { passive: false });
 
-	const PAD_MOUSE = { mouse0: 1, mouse1: 2 };
+	const PAD_MOUSE = { mouse0: 1, mouse1: 2, mouse2: 4 };
 	padSink = {
 		apply(codes) {
 			for (const c of new Set([...padKeys, ...codes])) {
@@ -698,6 +748,7 @@ function installInput(memory, block) {
 			padKeys = codes;
 			syncFlyAlias();
 		},
+		wheel(n) { Atomics.add(w, DZ, n); },
 		look(dx, dy) {
 			if (!locked()) Atomics.store(w, LOCKED, 1);		// the camera follows relative motion as with a captured mouse
 			Atomics.add(w, DX, dx);
