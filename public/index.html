@@ -37,6 +37,7 @@
 	#data { color: #6a9; }
 	#bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, .08); }
 	#fill { height: 100%; width: 0; background: #7cc576; }
+	#pad { position: fixed; left: 50%; top: 12px; transform: translateX(-50%); display: none; padding: 6px 14px; border-radius: 6px; background: #000b; color: #fff; font: 15px/1.3 system-ui, sans-serif; pointer-events: none; z-index: 10; }
 	#hud { position: fixed; left: 8px; bottom: 8px; max-width: 60vw; white-space: pre-wrap; opacity: .8; pointer-events: none; }
 	#fps { position: fixed; left: 8px; top: 6px; display: none; color: #0f0; font: bold 18px/1.2 Consolas, monospace; font-variant-numeric: tabular-nums; text-shadow: 1px 1px 2px #000, 0 0 3px #000; pointer-events: none; z-index: 10; }
 </style>
@@ -46,6 +47,7 @@
 <div id="hud"></div>
 <div id="loading"><div id="ls-stage"><div id="ls-screens"></div><img id="ls-logo" src="/b/8b0b5899ed/title/logo.png" alt=""><div id="ls-bars"><div id="modes" class="ls-bar"><button data-act="back"></button><button data-act="map5"></button><button data-act="map6"></button><button data-act="sandbox"></button><button data-act="story"></button></div><div class="ls-bar"><span id="label">Starting...</span><span id="pct">0%</span><i class="ls-spin"></i></div></div></div><div id="ls-log"><div id="data"></div><div id="console"></div></div><div id="bar"><div id="fill"></div></div></div>
 <div id="fps"></div>
+<div id="pad"></div>
 <script type="module">
 // Page of the browser build. The engine runs in a dedicated worker (loader.js: its "main thread", where the static constructors and
 // main() run and which may block); the page only owns the canvas, which is transferred to that worker and on to the GPU worker.
@@ -475,6 +477,78 @@ function tryStartAudio() {
 }
 for (const type of ['pointerdown', 'keydown']) addEventListener(type, () => { audioGesture = true; tryStartAudio(); }, { capture: true });
 
+// ---- controller: Gamepad API (standard mapping: Xbox, PlayStation and most others) -> the keys and mouse the PC bindings use ----------------------------
+// The engine's input block has only keyboard and mouse, so the controller presses PC keys. Two layouts like the console controls: on foot and in a vehicle.
+// Y (enter/exit vehicle) switches the layout; View + Y switches it without pressing F. A and B also press Enter and Backspace (menus, phone); the D-pad is the arrow keys.
+// View: camera (V), held: interaction menu (M). Menu: pause (Esc). Before the game starts, A = Story Mode, X = Sandbox Mode, B = Back.
+let padSink = null;
+{
+	const BTN = ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'VIEW', 'MENU', 'L3', 'R3', 'UP', 'DOWN', 'LEFT', 'RIGHT'];
+	const COMMON = { A: ['Enter'], B: ['Backspace'], MENU: ['Escape'], UP: ['ArrowUp'], DOWN: ['ArrowDown'], LEFT: ['ArrowLeft'], RIGHT: ['ArrowRight'] };
+	const FOOT = { A: ['ShiftLeft'], B: ['KeyR'], X: ['Space'], Y: ['KeyF'], LB: ['Tab'], RB: ['KeyQ'], RT: ['mouse0'], LT: ['mouse1'], L3: ['ControlLeft'], R3: ['KeyC'] };
+	const VEHICLE = { Y: ['KeyF'], RT: ['KeyW'], LT: ['KeyS'], RB: ['Space'], LB: ['mouse0'], X: ['KeyE'], L3: ['KeyE'], R3: ['KeyC'] };
+	const START = { A: ['Enter', 'Digit5'], X: ['Space', 'Digit6'], B: ['Backspace'] };
+	const LOOK_SPEED = 20;		// mouse pixels per 60 Hz frame at full right-stick deflection
+	let vehicle = false, prev = {}, lookX = 0, lookY = 0, last = 0, viewDown = 0, viewUsed = false, toastTimer = 0;
+	const taps = new Map();
+	const toastEl = document.getElementById('pad');
+	const toast = (text) => { toastEl.textContent = text; toastEl.style.display = 'block'; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastEl.style.display = 'none'; }, 2500); };
+	const layoutName = () => 'Controller: ' + (vehicle ? 'vehicle' : 'on foot') + ' controls (View + Y switches)';
+	const dead = (v, dz) => Math.abs(v) < dz ? 0 : Math.sign(v) * ((Math.abs(v) - dz) / (1 - dz));
+	addEventListener('gamepadconnected', (e) => { toast('Controller connected: ' + e.gamepad.id.replace(/\s*\(.*$/, '')); });
+	const poll = (now) => {
+		requestAnimationFrame(poll);
+		const dt = last ? Math.min(100, now - last) / (1000 / 60) : 1;
+		last = now;
+		const pad = [...(navigator.getGamepads ? navigator.getGamepads() : [])].find((p) => p && p.connected);
+		if (!pad || !document.hasFocus()) { if (padSink) padSink.apply(new Set()); prev = {}; return; }
+		const down = {};
+		BTN.forEach((name, i) => { const b = pad.buttons[i]; down[name] = !!b && (name === 'LT' || name === 'RT' ? b.value > 0.3 : b.pressed); });
+		const before = prev;
+		const pressed = (name) => down[name] && !before[name];
+		prev = down;
+		if (!startCommitted && document.getElementById('loading')) {		// the title screen's Story / Sandbox / map choice
+			for (const name of Object.keys(START)) {
+				if (!pressed(name)) continue;
+				const b = modeButtons.find((x) => !x.hidden && ACTS[x.dataset.act][2].some((c) => START[name].includes(c)));
+				if (b) act(b.dataset.act);
+			}
+			return;
+		}
+		if (!padSink) return;
+		if (pressed('VIEW')) { viewDown = now; viewUsed = false; }
+		if (down.VIEW && pressed('Y')) { vehicle = !vehicle; viewUsed = true; toast(layoutName()); }
+		else if (pressed('Y')) { vehicle = !vehicle; toast(layoutName()); }
+		if (!down.VIEW && viewDown) { if (!viewUsed) taps.set(now - viewDown > 600 ? 'KeyM' : 'KeyV', now + 120); viewDown = 0; }
+		const codes = new Set();
+		const layout = vehicle ? VEHICLE : FOOT;
+		for (const name of BTN) {
+			if (!down[name] || (name === 'Y' && down.VIEW)) continue;
+			for (const c of [...(COMMON[name] || []), ...(layout[name] || [])]) codes.add(c);
+		}
+		for (const [c, until] of taps) { if (now < until) codes.add(c); else taps.delete(c); }
+		const lx = dead(pad.axes[0] || 0, 0.25), ly = dead(pad.axes[1] || 0, 0.25);
+		if (vehicle) {
+			if (lx < -0.3) codes.add('KeyA').add('Numpad4');
+			if (lx > 0.3) codes.add('KeyD').add('Numpad6');
+			if (ly < -0.4) codes.add('Numpad8');
+			if (ly > 0.4) codes.add('Numpad2');
+		} else {
+			if (lx < -0.4) codes.add('KeyA');
+			if (lx > 0.4) codes.add('KeyD');
+			if (ly < -0.4) codes.add('KeyW');
+			if (ly > 0.4) codes.add('KeyS');
+		}
+		padSink.apply(codes);
+		const rx = dead(pad.axes[2] || 0, 0.15), ry = dead(pad.axes[3] || 0, 0.15);
+		lookX += Math.sign(rx) * rx * rx * LOOK_SPEED * dt;
+		lookY += Math.sign(ry) * ry * ry * LOOK_SPEED * dt;
+		const mx = Math.trunc(lookX), my = Math.trunc(lookY);
+		if (mx || my) { lookX -= mx; lookY -= my; padSink.look(mx, my); }
+	};
+	requestAnimationFrame(poll);
+}
+
 // ---- input: DOM events -> the engine's input block in shared memory (platform/input/browser_input_wasm.cpp) ------------------------
 // Layout of WasmInputBlock: 256 key bytes, then int32 words: mouseX, mouseY, dX, dY, dZ, buttons, focus, locked, textHead, textTail, text[64] (uint16).
 const VK = {
@@ -548,7 +622,8 @@ function installInput(memory, block) {
 	// and U/O (target left/right) press the same keys for the engine; the real numpad keeps working.
 	const FLY_ALIAS = { KeyI: 'Numpad8', KeyK: 'Numpad2', KeyJ: 'Numpad4', KeyL: 'Numpad6', KeyU: 'Numpad7', KeyO: 'Numpad9' };
 	const held = new Set();
-	const syncFlyAlias = () => { for (const [src, target] of Object.entries(FLY_ALIAS)) Atomics.store(keys, VK[target], held.has(src) || held.has(target) ? 0x80 : 0); };
+	let padKeys = new Set();		// keys the controller holds (controller section above)
+	const syncFlyAlias = () => { for (const [src, target] of Object.entries(FLY_ALIAS)) Atomics.store(keys, VK[target], held.has(src) || held.has(target) || padKeys.has(target) ? 0x80 : 0); };
 	addEventListener('keydown', (e) => {
 		if (passThrough(e)) return;
 		e.preventDefault();
@@ -611,6 +686,26 @@ function installInput(memory, block) {
 		const n = Math.trunc(wheelAccum);
 		if (n) { wheelAccum -= n; Atomics.add(w, DZ, n); }
 	}, { passive: false });
+
+	const PAD_MOUSE = { mouse0: 1, mouse1: 2 };
+	padSink = {
+		apply(codes) {
+			for (const c of new Set([...padKeys, ...codes])) {
+				const on = codes.has(c);
+				if (PAD_MOUSE[c]) { if (on) Atomics.or(w, BTN, PAD_MOUSE[c]); else if (padKeys.has(c)) Atomics.and(w, BTN, ~PAD_MOUSE[c]); }
+				else if (VK[c]) Atomics.store(keys, VK[c], on || held.has(c) ? 0x80 : 0);
+			}
+			padKeys = codes;
+			syncFlyAlias();
+		},
+		look(dx, dy) {
+			if (!locked()) Atomics.store(w, LOCKED, 1);		// the camera follows relative motion as with a captured mouse
+			Atomics.add(w, DX, dx);
+			Atomics.add(w, DY, dy);
+			Atomics.store(w, MX, Math.max(0, Math.min(W - 1, Atomics.load(w, MX) + dx)));
+			Atomics.store(w, MY, Math.max(0, Math.min(H - 1, Atomics.load(w, MY) + dy)));
+		},
+	};
 }
 </script>
 </body>

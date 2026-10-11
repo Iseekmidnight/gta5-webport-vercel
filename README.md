@@ -26,3 +26,26 @@ The exe contains everything in `public/` and runs a small local server on
 `127.0.0.1:8127` that streams game data from the `game-data-v2` release, then
 opens the game in Microsoft Edge (or Chrome) as an app window. Closing the game
 window stops the server.
+
+## Controller
+
+Xbox and PlayStation controllers work through the browser Gamepad API (press any
+button after the page loads). Start screen: A = Story, X = Sandbox, B = Back.
+
+| Control | On foot | In vehicle |
+| --- | --- | --- |
+| Left stick | Move (WASD) | Steer (A/D) |
+| Right stick | Camera | Camera |
+| RT / LT | Attack / Aim | Accelerate / Brake |
+| A | Sprint | |
+| B | Reload | |
+| X | Jump | Exit vehicle (E) |
+| Y | Enter vehicle (F) | Exit vehicle (F) |
+| LB / RB | Weapon wheel (Tab) / Cover (Q) | Fire / Handbrake |
+| L3 / R3 | Crouch / Look behind (C) | Horn (E) / Look behind (C) |
+| D-pad | Arrow keys | Arrow keys |
+| View | Tap: camera (V), hold: map (M) | same |
+| Menu | Pause (Esc) | Pause (Esc) |
+
+Y switches between the on-foot and vehicle layouts; View+Y switches without
+pressing F.
